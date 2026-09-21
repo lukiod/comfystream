@@ -158,6 +158,7 @@ if [ "$1" = "--build-engines" ]; then
     else
       python3 - <<'EOF'
 import os
+import sys
 import yaml
 import subprocess
 
@@ -170,6 +171,7 @@ if info:
   script = info.get("script")
   configs = info.get("configs", [])
   if folder and os.path.isdir(folder) and script and os.path.isfile(script):
+    failed = []
     for config in configs:
       if os.path.isfile(config):
         print(f"Building streamdiffusion engine with config: {config}")
@@ -177,8 +179,12 @@ if info:
           subprocess.run(["python", script, "--config", config], check=True)
         except subprocess.CalledProcessError as e:
           print(f"Error building engine for config {config}: {e}")
+          failed.append(config)
       else:
         print(f"Warning: Config {config} for streamdiffusion not found, skipping...")
+    if failed:
+      print(f"Failed to build {len(failed)} engine(s): {', '.join(failed)}")
+      sys.exit(1)
   else:
     print(f"Skipping streamdiffusion: required folder or script not found.")
 else:
