@@ -580,11 +580,12 @@ async def offer(request):
                     if not task.done():
                         task.cancel()
                 request.app["data_channel_tasks"].clear()
-            # Cleanup pipeline once per connection (not per track)
+            # Stop this connection's prompts only. The pipeline owns a shared
+            # client, so a full cleanup here would shut it down for every peer.
             if not is_noop_mode:
                 try:
-                    await pipeline.stop_prompts(cleanup=True)
-                    logger.info("Pipeline cleanup completed for failed connection")
+                    await pipeline.stop_prompts(cleanup=False)
+                    logger.info("Pipeline prompts stopped for failed connection")
                 except Exception as e:
                     logger.error(f"Error during pipeline cleanup on connection failure: {e}")
         elif pc.connectionState == "closed":
@@ -596,11 +597,11 @@ async def offer(request):
                     if not task.done():
                         task.cancel()
                 request.app["data_channel_tasks"].clear()
-            # Cleanup pipeline once per connection (not per track)
+            # Stop this connection's prompts only, see the failure branch above.
             if not is_noop_mode:
                 try:
-                    await pipeline.stop_prompts(cleanup=True)
-                    logger.info("Pipeline cleanup completed for closed connection")
+                    await pipeline.stop_prompts(cleanup=False)
+                    logger.info("Pipeline prompts stopped for closed connection")
                 except Exception as e:
                     logger.error(f"Error during pipeline cleanup on connection close: {e}")
 
@@ -674,6 +675,15 @@ async def on_shutdown(app: web.Application):
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros)
     pcs.clear()
+
+    # Full client teardown belongs to application shutdown, not to a peer.
+    pipeline = app.get("pipeline")
+    if pipeline is not None:
+        try:
+            await pipeline.stop_prompts(cleanup=True)
+            logger.info("Pipeline cleanup completed on shutdown")
+        except Exception as e:
+            logger.error(f"Error during pipeline cleanup on shutdown: {e}")
 
 
 if __name__ == "__main__":
