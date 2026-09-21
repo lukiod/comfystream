@@ -21,6 +21,10 @@ from .modalities import (
 WARMUP_RUNS = 5
 BOOTSTRAP_TIMEOUT_SECONDS = 30.0
 
+# Owners of the ingest gate, so overlapping pauses do not resume each other.
+INGEST_OWNER_MANUAL = "manual"
+INGEST_OWNER_WARMUP = "warmup"
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,7 +74,7 @@ class Pipeline:
         self.state_manager = PipelineStateManager(self.client)
         self._bootstrap_completed = False
         self._initialize_lock = asyncio.Lock()
-        self._ingest_enabled = True
+        self._ingest_holders: Set[str] = set()
         self._prompt_update_lock = asyncio.Lock()
         self._warmup_lock = asyncio.Lock()
         self._warmup_task: Optional[asyncio.Task] = None
@@ -203,7 +207,7 @@ class Pipeline:
                 return
 
             logger.info("Scheduling pipeline warmup for %sx%s", self.width, self.height)
-            self.disable_ingest()
+            self.disable_ingest(INGEST_OWNER_WARMUP)
             self._warmup_task = asyncio.create_task(self._run_background_warmup())
 
     async def _run_background_warmup(self):
@@ -215,7 +219,7 @@ class Pipeline:
         except Exception:
             logger.exception("Pipeline warmup failed")
         finally:
-            self.enable_ingest()
+            self.enable_ingest(INGEST_OWNER_WARMUP)
             self._warmup_task = None
 
     async def _reset_warmup_state(self):
@@ -229,6 +233,8 @@ class Pipeline:
                     pass
                 except Exception:
                     logger.debug("Warmup task raised during cancellation", exc_info=True)
+            # A task cancelled before its first step never runs its own finally.
+            self.enable_ingest(INGEST_OWNER_WARMUP)
             self._warmup_task = None
             self._warmup_completed = False
             self._last_warmup_resolution = None
@@ -409,17 +415,21 @@ class Pipeline:
                 logger.exception("Failed to transition pipeline to ERROR state")
             raise
 
-    def disable_ingest(self) -> None:
-        """Temporarily disable ingestion of new frames into the pipeline."""
-        self._ingest_enabled = False
+    def disable_ingest(self, owner: str = INGEST_OWNER_MANUAL) -> None:
+        """Temporarily disable ingestion of new frames into the pipeline.
 
-    def enable_ingest(self) -> None:
-        """Re-enable ingestion of new frames into the pipeline."""
-        self._ingest_enabled = True
+        Ingest stays disabled until every owner that disabled it releases the
+        gate, so one caller finishing cannot resume another caller's pause.
+        """
+        self._ingest_holders.add(owner)
+
+    def enable_ingest(self, owner: str = INGEST_OWNER_MANUAL) -> None:
+        """Release this owner's hold on the ingestion gate."""
+        self._ingest_holders.discard(owner)
 
     def is_ingest_enabled(self) -> bool:
         """Check if the pipeline is currently ingesting new frames."""
-        return self._ingest_enabled
+        return not self._ingest_holders
 
     async def apply_prompts(
         self,
@@ -452,7 +462,7 @@ class Pipeline:
             was_initialized = self.state_manager.is_initialized()
             restart_streaming = False
             capabilities: WorkflowModality | None = None
-            self.disable_ingest()
+            self.disable_ingest(INGEST_OWNER_MANUAL)
 
             try:
                 if was_streaming:
@@ -484,7 +494,7 @@ class Pipeline:
             except Exception:
                 raise
             finally:
-                self.enable_ingest()
+                self.enable_ingest(INGEST_OWNER_MANUAL)
                 if restart_streaming and self.state_manager.can_stream():
                     await self.start_streaming()
 
