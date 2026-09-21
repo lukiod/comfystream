@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -81,6 +82,7 @@ def download_hf_directory(repo_id, subfolder, destination, description=None):
         print(f"✓ Downloaded {repo_id}/{subfolder} to {destination}")
     except Exception as e:
         print(f"❌ Error downloading {repo_id}/{subfolder}: {e}")
+        shutil.rmtree(destination, ignore_errors=True)
         raise
 
 def setup_model_files(workspace_dir, config_path=None):
