@@ -206,6 +206,6 @@ def setup_models():
             sys.exit(1)
 
     setup_directories(workspace_dir)
-    setup_model_files(workspace_dir)
+    setup_model_files(workspace_dir, config_path)
 
 setup_models()
