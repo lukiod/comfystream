@@ -209,9 +209,18 @@ def monitor_resources(
     def run_py_spy():
         """Run py-spy profiler for deep profiling."""
         click.echo(click.style("Running py-spy for deep profiling...", fg="green"))
-        spy_cmd = f"py-spy record -o {spy_output} --pid {pid} --duration {duration}"
+        spy_cmd = [
+            "py-spy",
+            "record",
+            "-o",
+            spy_output,
+            "--pid",
+            str(pid),
+            "--duration",
+            str(duration),
+        ]
         try:
-            subprocess.run(spy_cmd, shell=True, check=True, capture_output=True, text=True)
+            subprocess.run(spy_cmd, check=True, capture_output=True, text=True)
             click.echo(click.style(f"Py-Spy flame graph saved to {spy_output}", fg="green"))
         except subprocess.CalledProcessError as e:
             click.echo(click.style(f"Error running py-spy: {e.stderr}", fg="red"))
