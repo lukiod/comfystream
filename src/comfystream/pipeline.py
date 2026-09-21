@@ -79,6 +79,7 @@ class Pipeline:
         self._warmup_lock = asyncio.Lock()
         self._warmup_task: Optional[asyncio.Task] = None
         self._warmup_completed = False
+        self._warmup_failed_resolution: Optional[tuple[int, int]] = None
         self._last_warmup_resolution: Optional[tuple[int, int]] = None
 
     @property
@@ -194,6 +195,12 @@ class Pipeline:
         if self._warmup_completed:
             return
 
+        if self._warmup_failed_resolution == (self.width, self.height):
+            # Callers reach this on every frame, so a retry here would rerun
+            # the full warmup once per frame at the same resolution.
+            logger.debug("Skipping warmup scheduling - previous attempt failed")
+            return
+
         if not self.state_manager.is_initialized():
             logger.debug("Skipping warmup scheduling - pipeline not initialized")
             return
@@ -217,6 +224,7 @@ class Pipeline:
             logger.debug("Pipeline warmup task cancelled")
             raise
         except Exception:
+            self._warmup_failed_resolution = (self.width, self.height)
             logger.exception("Pipeline warmup failed")
         finally:
             self.enable_ingest(INGEST_OWNER_WARMUP)
@@ -237,6 +245,7 @@ class Pipeline:
             self.enable_ingest(INGEST_OWNER_WARMUP)
             self._warmup_task = None
             self._warmup_completed = False
+            self._warmup_failed_resolution = None
             self._last_warmup_resolution = None
 
     async def _run_warmup(
