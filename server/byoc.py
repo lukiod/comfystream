@@ -159,7 +159,14 @@ def main():
 
             if orch_url and os.getenv("ORCH_SECRET", None):
                 # CAPABILITY_URL always overrides host:port from args
-                capability_url = os.getenv("CAPABILITY_URL") or f"http://{args.host}:{args.port}"
+                capability_url = os.getenv("CAPABILITY_URL")
+                if not capability_url and args.host in ("0.0.0.0", "::", ""):
+                    # A wildcard bind address is not a routable destination.
+                    raise RuntimeError(
+                        f"CAPABILITY_URL must be set when --host is {args.host}, "
+                        "the orchestrator cannot dial a wildcard address"
+                    )
+                capability_url = capability_url or f"http://{args.host}:{args.port}"
 
                 os.environ.update(
                     {
